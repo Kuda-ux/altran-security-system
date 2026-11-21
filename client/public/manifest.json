@@ -1,0 +1,46 @@
+{
+  "short_name": "Altran",
+  "name": "Altran Security Operations",
+  "description": "Guard control, visitor management, incident reporting, and patrol verification.",
+  "icons": [
+    {
+      "src": "altran-logo.jpg",
+      "type": "image/jpeg",
+      "sizes": "any",
+      "purpose": "any"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#005890",
+  "background_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "categories": ["business", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Check In",
+      "short_name": "Check In",
+      "description": "Visitor check-in",
+      "url": "/checkin"
+    },
+    {
+      "name": "Admin Dashboard",
+      "short_name": "Admin",
+      "description": "Admin Dashboard",
+      "url": "/admin"
+    },
+    {
+      "name": "Security Portal",
+      "short_name": "Security",
+      "description": "Security Portal",
+      "url": "/security"
+    },
+    {
+      "name": "Staff Portal",
+      "short_name": "Staff",
+      "description": "Staff Portal",
+      "url": "/staff"
+    }
+  ]
+}

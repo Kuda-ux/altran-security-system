@@ -1,0 +1,338 @@
+const { Pool } = require('@neondatabase/serverless');
+const bcrypt = require('bcryptjs');
+const { v4: uuidv4 } = require('uuid');
+
+let pool = null;
+
+function initNeon() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL environment variable is required for Neon PostgreSQL');
+  }
+  // Use Pool for better compatibility with parameterized queries
+  pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  return pool;
+}
+
+function getPool() {
+  if (!pool) {
+    initNeon();
+  }
+  return pool;
+}
+
+async function runQuery(query, params = []) {
+  const pool = getPool();
+  try {
+    // Convert ? placeholders to $1, $2, etc for PostgreSQL
+    let pgQuery = query;
+    let paramIndex = 0;
+    pgQuery = query.replace(/\?/g, () => `$${++paramIndex}`);
+    
+    // Pool.query returns { rows, fields, rowCount, ... }
+    const result = await pool.query(pgQuery, params);
+    return result.rows || [];
+  } catch (err) {
+    console.error('Query error:', err.message);
+    console.error('Query was:', query.substring(0, 200));
+    console.error('Params:', JSON.stringify(params));
+    throw err;
+  }
+}
+
+async function getOne(query, params = []) {
+  try {
+    const results = await runQuery(query, params);
+    return results[0] || null;
+  } catch (err) {
+    console.error('getOne error:', err.message);
+    console.error('Query:', query.substring(0, 200));
+    throw err; // Re-throw to let route handler catch it
+  }
+}
+
+async function getAll(query, params = []) {
+  try {
+    const results = await runQuery(query, params);
+    return results;
+  } catch (err) {
+    console.error('Query error:', err.message);
+    return [];
+  }
+}
+
+async function initializeDatabase() {
+  initNeon();
+  const pool = getPool();
+
+  // Create tables using PostgreSQL syntax
+  await pool.query(`CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    phone TEXT,
+    building_id TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active INTEGER DEFAULT 1
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS buildings (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    address TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    qr_code TEXT,
+    entry_qr_code TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active INTEGER DEFAULT 1
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS visitors (
+    id TEXT PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    id_number_encrypted TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    building_id TEXT NOT NULL,
+    device_fingerprint TEXT,
+    ip_address TEXT,
+    check_in_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    check_out_time TIMESTAMP,
+    status TEXT DEFAULT 'checked_in',
+    synced INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS staff_attendance (
+    id TEXT PRIMARY KEY,
+    staff_id TEXT NOT NULL,
+    building_id TEXT NOT NULL,
+    clock_in_time TIMESTAMP,
+    clock_out_time TIMESTAMP,
+    ip_address TEXT,
+    work_date TEXT NOT NULL,
+    total_hours REAL,
+    notes TEXT,
+    synced INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS tenants (
+    id TEXT PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    email TEXT,
+    phone TEXT NOT NULL,
+    unit_number TEXT NOT NULL,
+    building_id TEXT NOT NULL,
+    rent_amount REAL NOT NULL,
+    rent_due_day INTEGER DEFAULT 1,
+    lease_start TEXT,
+    lease_end TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS payments (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    building_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    payment_method TEXT NOT NULL,
+    payment_reference TEXT,
+    payment_status TEXT DEFAULT 'pending',
+    payment_date TIMESTAMP,
+    rent_month TEXT NOT NULL,
+    qr_code TEXT,
+    notes TEXT,
+    synced INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  for (const column of [
+    'staff_qr_code TEXT', 'employee_number TEXT', 'date_of_birth TEXT', 'address TEXT',
+    'emergency_contact TEXT', "clearance_status TEXT DEFAULT 'not_cleared'", 'profile_photo TEXT', 'client_id TEXT',
+    'failed_login_count INTEGER DEFAULT 0', 'locked_until TIMESTAMP'
+  ]) {
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${column}`);
+  }
+  await pool.query('ALTER TABLE buildings ADD COLUMN IF NOT EXISTS client_id TEXT');
+  for (const col of ['company_name TEXT', 'contact_phone TEXT', 'contact_email TEXT', 'industry TEXT', 'feedback TEXT']) {
+    await pool.query(`ALTER TABLE buildings ADD COLUMN IF NOT EXISTS ${col}`);
+  }
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS clients (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, contact_name TEXT, contact_phone TEXT,
+    contact_email TEXT, address TEXT, is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS employee_documents (
+    id TEXT PRIMARY KEY, employee_id TEXT NOT NULL, document_type TEXT NOT NULL,
+    document_name TEXT NOT NULL, document_url TEXT NOT NULL, expires_at TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS incident_reports (
+    id TEXT PRIMARY KEY, building_id TEXT NOT NULL, reported_by TEXT NOT NULL,
+    title TEXT NOT NULL, category TEXT NOT NULL, severity TEXT NOT NULL,
+    description TEXT NOT NULL, people_involved TEXT, actions_taken TEXT,
+    status TEXT DEFAULT 'open', occurred_at TIMESTAMP NOT NULL, resolved_at TIMESTAMP,
+    resolution_notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS assets (
+    id TEXT PRIMARY KEY, building_id TEXT NOT NULL, name TEXT NOT NULL,
+    asset_code TEXT UNIQUE NOT NULL, category TEXT, location TEXT, description TEXT,
+    status TEXT DEFAULT 'active', qr_code TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS patrol_rounds (
+    id TEXT PRIMARY KEY, building_id TEXT NOT NULL, guard_id TEXT NOT NULL,
+    supervisor_id TEXT, status TEXT DEFAULT 'in_progress', started_at TIMESTAMP NOT NULL,
+    completed_at TIMESTAMP, notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS patrol_scans (
+    id TEXT PRIMARY KEY, patrol_round_id TEXT NOT NULL, asset_id TEXT NOT NULL,
+    scanned_by TEXT NOT NULL, scanned_at TIMESTAMP NOT NULL, condition_status TEXT DEFAULT 'verified',
+    notes TEXT, UNIQUE(patrol_round_id, asset_id)
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS staff_entries (
+    id TEXT PRIMARY KEY,
+    staff_id TEXT NOT NULL,
+    building_id TEXT NOT NULL,
+    entry_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    exit_time TIMESTAMP,
+    status TEXT DEFAULT 'inside',
+    scanned_by TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS sync_queue (
+    id TEXT PRIMARY KEY,
+    table_name TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    synced INTEGER DEFAULT 0,
+    synced_at TIMESTAMP
+  )`);
+
+  // Vehicle tracking table
+  await pool.query(`CREATE TABLE IF NOT EXISTS vehicles (
+    id TEXT PRIMARY KEY,
+    registration_number TEXT UNIQUE NOT NULL,
+    make TEXT,
+    model TEXT,
+    color TEXT,
+    assigned_driver_id TEXT,
+    building_id TEXT,
+    status TEXT DEFAULT 'active',
+    last_latitude REAL,
+    last_longitude REAL,
+    last_location_update TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS vehicle_tracking (
+    id TEXT PRIMARY KEY,
+    vehicle_id TEXT NOT NULL,
+    driver_id TEXT,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    speed REAL,
+    heading REAL,
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Weapons management table
+  await pool.query(`CREATE TABLE IF NOT EXISTS weapons (
+    id TEXT PRIMARY KEY,
+    serial_number TEXT UNIQUE NOT NULL,
+    weapon_type TEXT NOT NULL,
+    make TEXT,
+    model TEXT,
+    caliber TEXT,
+    status TEXT DEFAULT 'available',
+    building_id TEXT,
+    current_holder_id TEXT,
+    issued_at TIMESTAMP,
+    returned_at TIMESTAMP,
+    condition_notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS weapon_assignments (
+    id TEXT PRIMARY KEY,
+    weapon_id TEXT NOT NULL,
+    guard_id TEXT NOT NULL,
+    issued_by TEXT NOT NULL,
+    issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    returned_at TIMESTAMP,
+    returned_to TEXT,
+    condition_on_issue TEXT,
+    condition_on_return TEXT,
+    notes TEXT
+  )`);
+
+  // Login logs table for tracking all login events
+  await pool.query(`CREATE TABLE IF NOT EXISTS login_logs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    full_name TEXT,
+    role TEXT,
+    ip_address TEXT,
+    user_agent TEXT,
+    login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status TEXT DEFAULT 'success'
+  )`);
+
+  // Create index on login_logs for fast lookups
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_login_logs_login_at ON login_logs(login_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_login_logs_user_id ON login_logs(user_id)`);
+
+  // Ensure attendance records are indexed for long-term storage
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_staff_attendance_work_date ON staff_attendance(work_date)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_staff_attendance_staff_id ON staff_attendance(staff_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_visitors_check_in_time ON visitors(check_in_time)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_staff_entries_entry_time ON staff_entries(entry_time)`);
+
+  // Check if admin exists
+  const adminCheck = await getOne("SELECT id FROM users WHERE role = $1", ['admin']);
+  if (!adminCheck) {
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'ChangeMe@123';
+    const adminName = process.env.ADMIN_NAME || 'System Administrator';
+    const adminPhone = process.env.ADMIN_PHONE || '+263000000000';
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    const id = uuidv4();
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO users (id, email, password, full_name, role, phone, created_at, updated_at, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [id, adminEmail, hashedPassword, adminName, 'admin', adminPhone, now, now, 1]
+    );
+    console.log('✅ Default admin created:', adminEmail);
+  }
+
+  console.log('✅ Neon PostgreSQL database initialized successfully');
+  return pool;
+}
+
+// For compatibility, also export saveDatabase as no-op
+function saveDatabase() {
+  // No-op for PostgreSQL - data is automatically persisted
+}
+
+module.exports = { getPool, initializeDatabase, runQuery, getOne, getAll, saveDatabase };

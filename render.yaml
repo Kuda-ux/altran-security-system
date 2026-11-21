@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: altran-security-api
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "node server/index.js"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false  # Set manually in Render dashboard
+      - key: FRONTEND_URL
+        sync: false  # Set to your Vercel URL
+      - key: BASE_URL
+        sync: false  # Set to your Vercel URL for QR codes
+      - key: ADMIN_EMAIL
+        sync: false  # Set your admin email
+      - key: ADMIN_PASSWORD
+        sync: false  # Set your admin password

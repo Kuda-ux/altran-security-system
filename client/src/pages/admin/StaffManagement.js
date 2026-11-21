@@ -1,0 +1,452 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Users, Plus, Search, Filter, MoreVertical, Mail, Phone, Building2,
+  Edit2, Trash2, UserCheck, UserX, Shield, Clock, Calendar, X, QrCode, Download, Key
+} from 'lucide-react';
+import api from '../../utils/api';
+
+function StaffManagement() {
+  const [staff, setStaff] = useState([]);
+  const [buildings, setBuildings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterBuilding, setFilterBuilding] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [editingStaff, setEditingStaff] = useState(null);
+  const [formData, setFormData] = useState({
+    email: '', password: '', full_name: '', phone: '', role: 'staff', building_id: ''
+  });
+  const [qrModal, setQrModal] = useState(null); // { id, full_name, qr_code }
+  const [qrGenerating, setQrGenerating] = useState(false);
+  const [passwordModal, setPasswordModal] = useState(null); // { id, full_name }
+  const [newPassword, setNewPassword] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
+
+  useEffect(() => {
+    fetchData();
+  }, [showInactive]);
+
+  const fetchData = async () => {
+    try {
+      const [staffRes, buildingsRes] = await Promise.all([
+        api.get(`/auth/users?role=staff,security,supervisor&include_inactive=${showInactive}`),
+        api.get('/buildings')
+      ]);
+      setStaff(staffRes.data.users || []);
+      setBuildings(buildingsRes.data.buildings || []);
+    } catch (err) {
+      console.error('Failed to fetch data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingStaff) {
+        await api.put(`/auth/users/${editingStaff.id}`, formData);
+      } else {
+        await api.post('/auth/register', formData);
+      }
+      setShowModal(false);
+      setEditingStaff(null);
+      setFormData({ email: '', password: '', full_name: '', phone: '', role: 'staff', building_id: '' });
+      fetchData();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to save staff member');
+    }
+  };
+
+  const handleEdit = (member) => {
+    setEditingStaff(member);
+    setFormData({
+      email: member.email,
+      password: '',
+      full_name: member.full_name,
+      phone: member.phone || '',
+      role: member.role,
+      building_id: member.building_id || ''
+    });
+    setShowModal(true);
+  };
+
+  const handleGenerateQR = async (member) => {
+    setQrGenerating(true);
+    try {
+      const res = await api.post(`/staff/generate-qr/${member.id}`);
+      setQrModal({ id: member.id, full_name: member.full_name, qr_code: res.data.qr_code });
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to generate QR code');
+    } finally {
+      setQrGenerating(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to deactivate this staff member? They will no longer be able to log in.')) return;
+    try {
+      await api.delete(`/auth/users/${id}`);
+      fetchData();
+    } catch (err) {
+      alert('Failed to deactivate staff member');
+    }
+  };
+
+  const handleReactivate = async (id) => {
+    if (!window.confirm('Reactivate this staff member? They will be able to log in again.')) return;
+    try {
+      await api.put(`/auth/users/${id}/reactivate`);
+      fetchData();
+    } catch (err) {
+      alert('Failed to reactivate staff member');
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    if (!newPassword || newPassword.length < 6) {
+      alert('Password must be at least 6 characters');
+      return;
+    }
+    try {
+      await api.put(`/auth/users/${passwordModal.id}/password`, { newPassword });
+      alert(`Password reset successfully for ${passwordModal.full_name}`);
+      setPasswordModal(null);
+      setNewPassword('');
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to reset password');
+    }
+  };
+
+  const filteredStaff = staff.filter(member => {
+    const matchesSearch = member.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         member.email?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesBuilding = !filterBuilding || member.building_id === filterBuilding;
+    return matchesSearch && matchesBuilding;
+  });
+
+  const getRoleBadge = (role) => {
+    const styles = {
+      staff: 'bg-[rgba(212,174,42,0.08)] text-[#005890]',
+      security: 'bg-purple-500/20 text-purple-400',
+      supervisor: 'bg-blue-500/20 text-blue-400',
+      admin: 'bg-red-500/20 text-red-400',
+      owner: 'bg-amber-500/20 text-amber-400'
+    };
+    return styles[role] || 'bg-[#1f1f1f] text-[#888]';
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Staff Management</h1>
+          <p className="text-[#888] mt-1">Manage your staff and security personnel</p>
+        </div>
+        <button
+          onClick={() => { setEditingStaff(null); setFormData({ email: '', password: '', full_name: '', phone: '', role: 'staff', building_id: '' }); setShowModal(true); }}
+          className="flex items-center gap-2 px-4 py-2.5 bg-[#005890] text-black rounded-xl hover:bg-[#0070b0] transition font-medium"
+        >
+          <Plus className="w-5 h-5" />
+          Add Staff Member
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#666]" />
+          <input
+            type="text"
+            placeholder="Search by name or email..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl text-white placeholder-[#555] focus:border-[#005890] focus:ring-2 focus:ring-[rgba(212,174,42,0.15)]"
+          />
+        </div>
+        <select
+          value={filterBuilding}
+          onChange={(e) => setFilterBuilding(e.target.value)}
+          className="px-4 py-2.5 bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl text-white focus:border-[#005890] focus:ring-2 focus:ring-[rgba(212,174,42,0.15)]"
+        >
+          <option value="">All Client Sites</option>
+          {buildings.map(b => (
+            <option key={b.id} value={b.id}>{b.name}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => setShowInactive(!showInactive)}
+          className={`px-4 py-2.5 rounded-xl text-sm font-medium border transition ${showInactive ? 'bg-red-500/10 border-red-500/30 text-red-400' : 'bg-[#0a0a0a] border-[#2a2a2a] text-[#888] hover:border-[#005890]'}`}
+        >
+          {showInactive ? 'Showing Inactive' : 'Show Inactive'}
+        </button>
+      </div>
+
+      {/* Staff Grid */}
+      {loading ? (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="bg-[#111111] rounded-2xl p-6 animate-pulse border border-[#1f1f1f]">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-12 h-12 bg-[#1f1f1f] rounded-full" />
+                <div className="flex-1">
+                  <div className="h-4 bg-[#1f1f1f] rounded w-3/4 mb-2" />
+                  <div className="h-3 bg-[#1f1f1f] rounded w-1/2" />
+                </div>
+              </div>
+              <div className="h-3 bg-[#1f1f1f] rounded w-full mb-2" />
+              <div className="h-3 bg-[#1f1f1f] rounded w-2/3" />
+            </div>
+          ))}
+        </div>
+      ) : filteredStaff.length === 0 ? (
+        <div className="bg-[#111111] rounded-2xl p-12 text-center border border-[#1f1f1f]">
+          <Users className="w-16 h-16 text-[#555] mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-white mb-2">No Staff Members Found</h3>
+          <p className="text-[#888] mb-6">Get started by adding your first staff member</p>
+          <button
+            onClick={() => setShowModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-[#005890] text-black rounded-xl hover:bg-[#0070b0] transition"
+          >
+            <Plus className="w-5 h-5" />
+            Add Staff Member
+          </button>
+        </div>
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredStaff.map(member => (
+            <div key={member.id} className={`bg-[#111111] rounded-2xl p-6 border ${member.is_active ? 'border-[#1f1f1f] hover:border-[#2a2a2a]' : 'border-red-500/20 opacity-75'} transition group`}>
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center font-semibold text-lg ${member.is_active ? 'bg-gradient-to-br from-[#005890] to-[#004a70] text-black' : 'bg-[#2a2a2a] text-[#666]'}`}>
+                    {member.full_name?.charAt(0)}
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-white">{member.full_name}</h3>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium capitalize ${getRoleBadge(member.role)}`}>
+                        {member.role}
+                      </span>
+                      {!member.is_active && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/15 text-red-400">Deactivated</span>}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                  {member.is_active ? (
+                    <>
+                      <button onClick={() => handleGenerateQR(member)} className="p-1.5 hover:bg-[rgba(212,174,42,0.08)] rounded-lg" title="Generate QR Code">
+                        <QrCode className="w-4 h-4 text-[#005890]" />
+                      </button>
+                      <button onClick={() => setPasswordModal({ id: member.id, full_name: member.full_name })} className="p-1.5 hover:bg-amber-500/10 rounded-lg" title="Reset Password">
+                        <Key className="w-4 h-4 text-amber-500" />
+                      </button>
+                      <button onClick={() => handleEdit(member)} className="p-1.5 hover:bg-[#1a1a1a] rounded-lg" title="Edit">
+                        <Edit2 className="w-4 h-4 text-[#888]" />
+                      </button>
+                      <button onClick={() => handleDelete(member.id)} className="p-1.5 hover:bg-red-500/10 rounded-lg" title="Deactivate">
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={() => handleReactivate(member.id)} className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg text-xs font-medium hover:bg-emerald-500/20 transition" title="Reactivate">
+                      Reactivate
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2 text-[#888]">
+                  <Mail className="w-4 h-4" />
+                  <span className="truncate">{member.email}</span>
+                </div>
+                {member.phone && (
+                  <div className="flex items-center gap-2 text-[#888]">
+                    <Phone className="w-4 h-4" />
+                    <span>{member.phone}</span>
+                  </div>
+                )}
+                {member.building_name && (
+                  <div className="flex items-center gap-2 text-[#888]">
+                    <Building2 className="w-4 h-4" />
+                    <span>{member.building_name}</span>
+                  </div>
+                )}
+              </div>
+              <div className="mt-4 pt-4 border-t border-[#1f1f1f] flex items-center justify-between text-xs text-[#666]">
+                <span className="flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5" />
+                  Joined {new Date(member.created_at).toLocaleDateString()}
+                </span>
+                <span className={`flex items-center gap-1 ${member.is_active ? 'text-green-500' : 'text-red-500'}`}>
+                  {member.is_active ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
+                  {member.is_active ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add/Edit Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm overflow-y-auto p-3 sm:p-6">
+          <div className="min-h-full flex items-center justify-center">
+            <div className="relative bg-[#111111] rounded-2xl sm:rounded-3xl w-full max-w-2xl shadow-2xl shadow-black/50 border border-[#2a2a2a] overflow-hidden">
+              <div className="flex items-start justify-between gap-4 px-5 py-5 sm:px-7 sm:py-6 border-b border-[#242424] bg-gradient-to-r from-[rgba(212,174,42,0.08)] to-transparent">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#005890] mb-1">Personnel Management</p>
+                  <h2 className="text-xl sm:text-2xl font-bold text-white">
+                    {editingStaff ? 'Edit Staff Member' : 'Add Staff Member'}
+                  </h2>
+                  <p className="text-sm text-[#777] mt-1">Create secure access and assign the correct operational role.</p>
+                </div>
+                <button type="button" onClick={() => setShowModal(false)} className="shrink-0 p-2.5 hover:bg-white/5 rounded-xl transition" aria-label="Close form">
+                  <X className="w-5 h-5 text-[#999]" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmit}>
+                <div className="p-5 sm:p-7 grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-[#aaa] mb-2">Full Name <span className="text-[#005890]">*</span></label>
+                    <input type="text" required autoComplete="name" placeholder="Enter full legal name" value={formData.full_name} onChange={(e) => setFormData({ ...formData, full_name: e.target.value })} className="field" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#aaa] mb-2">Email Address <span className="text-[#005890]">*</span></label>
+                    <input type="email" required autoComplete="email" placeholder="name@company.com" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className="field" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#aaa] mb-2">Phone Number</label>
+                    <input type="tel" autoComplete="tel" placeholder="e.g. +263 77 000 0000" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className="field" />
+                  </div>
+                  {!editingStaff && (
+                    <div className="sm:col-span-2">
+                      <label className="block text-sm font-medium text-[#aaa] mb-2">Temporary Password <span className="text-[#005890]">*</span></label>
+                      <input type="password" required minLength={6} autoComplete="new-password" placeholder="Minimum 6 characters" value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} className="field" />
+                      <p className="text-xs text-[#666] mt-2">The staff member should change this password after their first login.</p>
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium text-[#aaa] mb-2">Operational Role <span className="text-[#005890]">*</span></label>
+                    <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} className="field">
+                      <option value="staff">Staff Member</option>
+                      <option value="security">Security Guard</option>
+                      <option value="supervisor">Site Supervisor</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#aaa] mb-2">Assigned Client Site</label>
+                    <select value={formData.building_id} onChange={(e) => setFormData({ ...formData, building_id: e.target.value })} className="field">
+                      <option value="">Select a client site</option>
+                      {buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-5 py-4 sm:px-7 border-t border-[#242424] bg-[#0d0d0d]">
+                  <button type="button" onClick={() => setShowModal(false)} className="w-full sm:w-auto px-6 py-3 border border-[#333] text-[#aaa] rounded-xl hover:bg-[#1a1a1a] hover:text-white transition font-medium">
+                    Cancel
+                  </button>
+                  <button type="submit" className="w-full sm:w-auto px-7 py-3 bg-[#005890] text-black rounded-xl hover:bg-[#0070b0] shadow-lg shadow-[#005890]/10 transition font-semibold">
+                    {editingStaff ? 'Save Changes' : 'Add Staff Member'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QR Code Modal */}
+      {qrModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70" onClick={() => setQrModal(null)} />
+          <div className="relative bg-[#111111] rounded-2xl w-full max-w-sm p-6 shadow-2xl text-center border border-[#1f1f1f]">
+            <button onClick={() => setQrModal(null)} className="absolute top-4 right-4 p-2 hover:bg-[#1a1a1a] rounded-lg">
+              <X className="w-5 h-5 text-[#888]" />
+            </button>
+            <QrCode className="w-10 h-10 text-[#005890] mx-auto mb-3" />
+            <h2 className="text-lg font-bold text-white mb-1">Staff QR Code</h2>
+            <p className="text-[#888] text-sm mb-4">{qrModal.full_name}</p>
+            <div className="bg-white rounded-xl p-4 inline-block mb-4">
+              <img src={qrModal.qr_code} alt="Staff QR Code" className="w-56 h-56 mx-auto" />
+            </div>
+            <p className="text-[#555] text-xs mb-4">Security guards scan this code to record staff entry/exit</p>
+            <div className="flex gap-3">
+              <a
+                href={qrModal.qr_code}
+                download={`staff-qr-${qrModal.full_name.replace(/\s/g, '-')}.png`}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-[#005890] text-black rounded-xl hover:bg-[#0070b0] transition font-medium"
+              >
+                <Download className="w-4 h-4" />
+                Download
+              </a>
+              <button
+                onClick={() => {
+                  const w = window.open('', '_blank');
+                  w.document.write(`<html><head><title>QR Code - ${qrModal.full_name}</title></head><body style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;"><h2>${qrModal.full_name}</h2><img src="${qrModal.qr_code}" style="width:300px;height:300px;" /><p style="color:#666;">Staff Building Pass</p></body></html>`);
+                  w.document.close();
+                  w.print();
+                }}
+                className="flex-1 px-4 py-2.5 border border-[#2a2a2a] text-[#888] rounded-xl hover:bg-[#1a1a1a] transition font-medium"
+              >
+                Print
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password Reset Modal */}
+      {passwordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70" onClick={() => { setPasswordModal(null); setNewPassword(''); }} />
+          <div className="relative bg-[#111111] rounded-2xl w-full max-w-md p-6 shadow-2xl border border-[#1f1f1f]">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-white">Reset Password</h2>
+              <button onClick={() => { setPasswordModal(null); setNewPassword(''); }} className="p-2 hover:bg-[#1a1a1a] rounded-lg">
+                <X className="w-5 h-5 text-[#888]" />
+              </button>
+            </div>
+            <p className="text-[#888] mb-4">
+              Set a new password for <strong className="text-white">{passwordModal.full_name}</strong>
+            </p>
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-[#888] mb-1">New Password</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Minimum 6 characters"
+                  className="w-full px-4 py-2.5 bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl text-white placeholder-[#555] focus:border-[#005890] focus:ring-2 focus:ring-[rgba(212,174,42,0.15)]"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setPasswordModal(null); setNewPassword(''); }}
+                  className="flex-1 px-4 py-2.5 border border-[#2a2a2a] text-[#888] rounded-xl hover:bg-[#1a1a1a] transition font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-xl hover:bg-amber-700 transition font-medium"
+                >
+                  Reset Password
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default StaffManagement;
