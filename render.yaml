@@ -10,16 +10,20 @@ services:
       - key: NODE_ENV
         value: production
       - key: JWT_SECRET
-        generateValue: true
+        sync: false
       - key: ENCRYPTION_KEY
-        generateValue: true
+        sync: false
       - key: DATABASE_URL
-        sync: false  # Set manually in Render dashboard
+        sync: false
       - key: FRONTEND_URL
-        sync: false  # Set to your Vercel URL
+        sync: false
       - key: BASE_URL
-        sync: false  # Set to your Vercel URL for QR codes
+        sync: false
       - key: ADMIN_EMAIL
-        sync: false  # Set your admin email
+        sync: false
       - key: ADMIN_PASSWORD
-        sync: false  # Set your admin password
+        sync: false
+      - key: ADMIN_NAME
+        value: System Administrator
+      - key: ADMIN_PHONE
+        value: "+263000000000"
