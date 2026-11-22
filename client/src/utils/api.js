@@ -6,7 +6,7 @@ const LOCAL_API = 'http://localhost:5000/api';
 
 // Production API URL — set via REACT_APP_API_URL env var on Vercel,
 // or falls back to the value in branding config.
-const PRODUCTION_API = branding.apiBaseUrl || 'https://your-api.onrender.com/api';
+const PRODUCTION_API = branding.apiBaseUrl || 'https://altran-security-system.onrender.com/api';
 
 const getApiUrl = () => {
   const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
